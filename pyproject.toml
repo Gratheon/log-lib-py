@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gratheon-log-lib"
+version = "0.1.0"
+description = "Python logging library with colored console output and optional Loki persistence"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "ISC" }
+authors = [
+  { name = "Artjom Kurapov" }
+]
+keywords = ["logging", "logger", "loki", "python"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: ISC License (ISCL)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Logging",
+]
+
+[project.urls]
+Homepage = "https://github.com/Gratheon/log-lib-py"
+Repository = "https://github.com/Gratheon/log-lib-py"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
