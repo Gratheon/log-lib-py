@@ -13,7 +13,7 @@ import traceback
 import types
 import urllib.error
 import urllib.request
-from typing import Any, Iterator
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type
 
 
 RESET = "\033[0m"
@@ -32,40 +32,40 @@ LOG_LEVELS = {
     "error": 3,
 }
 
-_context_fields: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+_context_fields: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
     "gratheon_log_lib_context", default={}
 )
 _logger_lock = threading.RLock()
-_global_logger: "GratheonLogger | None" = None
+_global_logger = None  # type: Optional["GratheonLogger"]
 _project_root = pathlib.Path.cwd()
 _handlers_installed = False
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass
 class LokiConfig:
-    url: str | None = None
-    username: str | None = None
-    password: str | None = None
-    tenant_id: str | None = None
-    service: str | None = None
-    labels: dict[str, str] | None = None
-    enabled: bool | None = None
+    url: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    tenant_id: Optional[str] = None
+    service: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
+    enabled: Optional[bool] = None
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass
 class LoggerConfig:
-    loki: LokiConfig | None = None
-    log_level: str | None = None
+    loki: Optional[LokiConfig] = None
+    log_level: Optional[str] = None
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass
 class _ResolvedLokiConfig:
     url: str
     service: str
-    labels: dict[str, str]
-    username: str | None = None
-    password: str | None = None
-    tenant_id: str | None = None
+    labels: Dict[str, str]
+    username: Optional[str] = None
+    password: Optional[str] = None
+    tenant_id: Optional[str] = None
     enabled: bool = True
 
 
@@ -79,7 +79,7 @@ def clear_context() -> None:
     _context_fields.set({})
 
 
-def get_context() -> dict[str, Any]:
+def get_context() -> Dict[str, Any]:
     return dict(_context_fields.get())
 
 
@@ -108,7 +108,7 @@ def _detect_service_name() -> str:
     return pathlib.Path.cwd().name or "service"
 
 
-def _resolve_log_level(level: str | None) -> str:
+def _resolve_log_level(level: Optional[str]) -> str:
     if level:
         return _normalize_log_level(level)
     env_level = os.getenv("LOG_LEVEL", "").strip()
@@ -130,7 +130,7 @@ def _normalize_log_level(level: str) -> str:
     return "info"
 
 
-def _resolve_loki_config(config: LoggerConfig | None) -> _ResolvedLokiConfig | None:
+def _resolve_loki_config(config: Optional[LoggerConfig]) -> Optional[_ResolvedLokiConfig]:
     explicit = config.loki if config else None
     enabled = True if explicit is None or explicit.enabled is None else explicit.enabled
     if not enabled:
@@ -206,7 +206,7 @@ def _relativize_path(file_path: str) -> str:
         return file_path
 
 
-def _call_site(skip: int = 2) -> str | None:
+def _call_site(skip: int = 2) -> Optional[str]:
     frame = sys._getframe(skip)
     while frame:
         file_name = frame.f_code.co_filename
@@ -217,7 +217,7 @@ def _call_site(skip: int = 2) -> str | None:
     return None
 
 
-def _exception_frame(exc: BaseException) -> tuple[str | None, int | None]:
+def _exception_frame(exc: BaseException) -> Tuple[Optional[str], Optional[int]]:
     tb = exc.__traceback__
     if tb is None:
         return None, None
@@ -251,17 +251,17 @@ def _build_code_frame(exc: BaseException, context_lines: int = 2) -> str:
 
     start = max(1, culprit.lineno - context_lines)
     end = min(len(lines), culprit.lineno + context_lines)
-    output: list[str] = []
+    output = []  # type: List[str]
     for line_no in range(start, end + 1):
         prefix = f"{RED}>{RESET}" if line_no == culprit.lineno else " "
         output.append(f"{prefix} {line_no:4d} | {lines[line_no - 1]}")
     return "\n".join(output)
 
 
-def _cause_chain(exc: BaseException) -> list[str]:
-    chain: list[str] = []
+def _cause_chain(exc: BaseException) -> List[str]:
+    chain = []  # type: List[str]
     current = exc.__cause__ or exc.__context__
-    seen: set[int] = set()
+    seen = set()  # type: Set[int]
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         chain.append(f"{current.__class__.__name__}: {current}")
@@ -270,32 +270,32 @@ def _cause_chain(exc: BaseException) -> list[str]:
 
 
 class GratheonLogger:
-    def __init__(self, config: LoggerConfig | None = None) -> None:
+    def __init__(self, config: Optional[LoggerConfig] = None) -> None:
         self._config = config or LoggerConfig()
         self._log_level = _resolve_log_level(self._config.log_level)
         self._loki = _resolve_loki_config(self._config)
 
-    def info(self, message: Any, meta: dict[str, Any] | None = None) -> None:
+    def info(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
         self._emit("info", _safe_message(message), meta or {})
 
-    def warn(self, message: Any, meta: dict[str, Any] | None = None) -> None:
+    def warn(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
         self._emit("warn", _safe_message(message), meta or {})
 
-    def debug(self, message: Any, meta: dict[str, Any] | None = None) -> None:
+    def debug(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
         self._emit("debug", _safe_message(message), meta or {}, persist=False)
 
-    def error(self, message: Any, meta: dict[str, Any] | None = None) -> None:
+    def error(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
         if isinstance(message, BaseException):
             self._emit_exception(message, meta or {})
             return
         self._emit("error", _safe_message(message), meta or {})
 
-    def fatal(self, message: Any, meta: dict[str, Any] | None = None) -> None:
+    def fatal(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
         self.error(message, meta)
         raise SystemExit(1)
 
     def error_enriched(
-        self, message: str, error: BaseException | Any, meta: dict[str, Any] | None = None
+        self, message: str, error: Any, meta: Optional[Dict[str, Any]] = None
     ) -> None:
         payload = meta or {}
         if isinstance(error, BaseException):
@@ -310,11 +310,11 @@ class GratheonLogger:
         self,
         level: str,
         message: str,
-        meta: dict[str, Any],
+        meta: Dict[str, Any],
         *,
         persist: bool = True,
         stacktrace: str = "",
-        file_location: str | None = None,
+        file_location: Optional[str] = None,
     ) -> None:
         if not self._should_log(level):
             return
@@ -325,7 +325,7 @@ class GratheonLogger:
             self._store_in_loki(level, message, merged_meta, stacktrace)
 
     def _emit_exception(
-        self, exc: BaseException, meta: dict[str, Any], prefix: str = ""
+        self, exc: BaseException, meta: Dict[str, Any], prefix: str = ""
     ) -> None:
         file_name, line_no = _exception_frame(exc)
         location = f"{file_name}:{line_no}" if file_name and line_no else None
@@ -351,7 +351,7 @@ class GratheonLogger:
                 print(f"\n{CYAN}Code frame:{RESET}\n{code_frame}\n")
 
     def _write_console(
-        self, level: str, message: str, meta: dict[str, Any], file_location: str | None
+        self, level: str, message: str, meta: Dict[str, Any], file_location: Optional[str]
     ) -> None:
         now = time.strftime("%H:%M:%S", time.localtime())
         timestamp = f"{BLUE}{now}{RESET}"
@@ -369,7 +369,7 @@ class GratheonLogger:
         print(f"{timestamp} [{level_colored}]: {message_colored}{meta_text}{location_text}")
 
     def _store_in_loki(
-        self, level: str, message: str, meta: dict[str, Any], stacktrace: str = ""
+        self, level: str, message: str, meta: Dict[str, Any], stacktrace: str = ""
     ) -> None:
         if self._loki is None or not self._loki.enabled:
             return
@@ -384,7 +384,7 @@ class GratheonLogger:
         thread.start()
 
     def _safe_payload_for_test(
-        self, level: str, message: str, meta: dict[str, Any], stacktrace: str = ""
+        self, level: str, message: str, meta: Dict[str, Any], stacktrace: str = ""
     ) -> bytes:
         if self._loki is None:
             raise RuntimeError("Loki is not configured")
@@ -431,11 +431,11 @@ class GratheonLogger:
                 print("[log-lib-py] Failed to persist log to Loki", file=sys.stderr)
 
 
-def create_logger(config: LoggerConfig | None = None) -> GratheonLogger:
+def create_logger(config: Optional[LoggerConfig] = None) -> GratheonLogger:
     return GratheonLogger(config)
 
 
-def configure(config: LoggerConfig | None = None) -> GratheonLogger:
+def configure(config: Optional[LoggerConfig] = None) -> GratheonLogger:
     global _global_logger
     instance = create_logger(config)
     with _logger_lock:
@@ -453,27 +453,27 @@ def get_logger() -> GratheonLogger:
         return _global_logger
 
 
-def info(message: Any, meta: dict[str, Any] | None = None) -> None:
+def info(message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().info(message, meta)
 
 
-def warn(message: Any, meta: dict[str, Any] | None = None) -> None:
+def warn(message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().warn(message, meta)
 
 
-def debug(message: Any, meta: dict[str, Any] | None = None) -> None:
+def debug(message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().debug(message, meta)
 
 
-def error(message: Any, meta: dict[str, Any] | None = None) -> None:
+def error(message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().error(message, meta)
 
 
-def error_enriched(message: str, err: BaseException | Any, meta: dict[str, Any] | None = None) -> None:
+def error_enriched(message: str, err: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().error_enriched(message, err, meta)
 
 
-def fatal(message: Any, meta: dict[str, Any] | None = None) -> None:
+def fatal(message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
     get_logger().fatal(message, meta)
 
 
@@ -484,7 +484,9 @@ def _install_global_handlers() -> None:
 
     previous_sys_hook = sys.excepthook
 
-    def excepthook(exc_type: type[BaseException], exc: BaseException, tb: types.TracebackType | None) -> None:
+    def excepthook(
+        exc_type: Type[BaseException], exc: BaseException, tb: Optional[types.TracebackType]
+    ) -> None:
         print("=== UNCAUGHT EXCEPTION ===", file=sys.stderr)
         try:
             get_logger().error(exc)
@@ -495,7 +497,7 @@ def _install_global_handlers() -> None:
 
     previous_thread_hook = getattr(threading, "excepthook", None)
 
-    def thread_excepthook(args: threading.ExceptHookArgs) -> None:
+    def thread_excepthook(args: Any) -> None:
         print("=== UNCAUGHT THREAD EXCEPTION ===", file=sys.stderr)
         try:
             get_logger().error(args.exc_value)
