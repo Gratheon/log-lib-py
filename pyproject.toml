@@ -4,15 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gratheon-log-lib"
-version = "0.1.0"
-description = "Python logging library with colored console output and optional Loki persistence"
+version = "1.0.0"
+description = "Python logging library with colored console output and optional OTLP persistence"
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+  "opentelemetry-sdk>=1.41,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.41,<2",
+]
 license = { text = "ISC" }
 authors = [
   { name = "Artjom Kurapov" }
 ]
-keywords = ["logging", "logger", "loki", "python"]
+keywords = ["logging", "logger", "otlp", "opentelemetry", "python"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

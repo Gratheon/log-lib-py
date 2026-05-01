@@ -11,6 +11,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from gratheon_log_lib import (
     LoggerConfig,
     LokiConfig,
+    OtlpConfig,
     bind_context,
     clear_context,
     create_logger,
@@ -79,6 +80,26 @@ class LoggerTests(unittest.TestCase):
         body = json.loads(payload.decode("utf-8"))
         self.assertEqual("svc", body["streams"][0]["stream"]["service"])
         self.assertEqual("platform", body["streams"][0]["stream"]["team"])
+
+    def test_otlp_payload_uses_resource_attributes(self) -> None:
+        logger = create_logger(
+            LoggerConfig(
+                otlp=OtlpConfig(
+                    enabled=True,
+                    endpoint="http://collector:4318",
+                    service="svc",
+                    resource_attributes={"team": "platform"},
+                )
+            )
+        )
+        with patch("threading.Thread.start") as start_mock:
+            logger.info("hello", {"trace_id": "abc", "span_id": "def"})
+        start_mock.assert_called_once()
+        payload = logger._otlp_payload_for_test("info", "hello", {}, "")
+        body = json.loads(payload.decode("utf-8"))
+        self.assertEqual("hello", body["body"])
+        self.assertEqual("INFO", body["severity_text"])
+        self.assertEqual(9, body["severity_number"])
 
     def test_fatal_raises_system_exit(self) -> None:
         with self.assertRaises(SystemExit):
