@@ -11,8 +11,6 @@ import threading
 import time
 import traceback
 import types
-import urllib.error
-import urllib.request
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type
 
 
@@ -42,20 +40,8 @@ _handlers_installed = False
 
 
 @dataclasses.dataclass
-class LokiConfig:
-    url: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    tenant_id: Optional[str] = None
-    service: Optional[str] = None
-    labels: Optional[Dict[str, str]] = None
-    enabled: Optional[bool] = None
-
-
-@dataclasses.dataclass
 class LoggerConfig:
     otlp: Optional["OtlpConfig"] = None
-    loki: Optional[LokiConfig] = None
     log_level: Optional[str] = None
 
 
@@ -66,17 +52,6 @@ class OtlpConfig:
     service: Optional[str] = None
     resource_attributes: Optional[Dict[str, str]] = None
     enabled: Optional[bool] = None
-
-
-@dataclasses.dataclass
-class _ResolvedLokiConfig:
-    url: str
-    service: str
-    labels: Dict[str, str]
-    username: Optional[str] = None
-    password: Optional[str] = None
-    tenant_id: Optional[str] = None
-    enabled: bool = True
 
 
 @dataclasses.dataclass
@@ -148,37 +123,6 @@ def _normalize_log_level(level: str) -> str:
     if normalized in ("fatal", "panic", "error"):
         return "error"
     return "info"
-
-
-def _resolve_loki_config(config: Optional[LoggerConfig]) -> Optional[_ResolvedLokiConfig]:
-    explicit = config.loki if config else None
-    if explicit is None and not os.getenv("LOKI_URL", "").strip():
-        return None
-    enabled = True if explicit is None or explicit.enabled is None else explicit.enabled
-    if not enabled:
-        return None
-
-    service = explicit.service.strip() if explicit and explicit.service else _detect_service_name()
-    url = explicit.url.strip() if explicit and explicit.url else _env_or_default(
-        "LOKI_URL", "http://loki:3100/loki/api/v1/push"
-    )
-    labels = {
-        "service": service,
-        "env": _env_or_default("ENV_ID", "unknown"),
-        "logger": "log-lib-py",
-    }
-    if explicit and explicit.labels:
-        labels.update(explicit.labels)
-
-    return _ResolvedLokiConfig(
-        url=url,
-        service=service,
-        labels=labels,
-        username=explicit.username if explicit else None,
-        password=explicit.password if explicit else None,
-        tenant_id=explicit.tenant_id if explicit else None,
-        enabled=True,
-    )
 
 
 def _parse_key_value_list(raw: str) -> Dict[str, str]:
@@ -405,7 +349,6 @@ class GratheonLogger:
     def __init__(self, config: Optional[LoggerConfig] = None) -> None:
         self._config = config or LoggerConfig()
         self._log_level = _resolve_log_level(self._config.log_level)
-        self._loki = _resolve_loki_config(self._config)
         self._otlp = _resolve_otlp_config(self._config)
 
     def info(self, message: Any, meta: Optional[Dict[str, Any]] = None) -> None:
@@ -456,7 +399,6 @@ class GratheonLogger:
         self._write_console(level, message, merged_meta, file_location or _call_site(4))
         if persist and level != "debug":
             self._store_in_otlp(level, message, merged_meta, stacktrace)
-            self._store_in_loki(level, message, merged_meta, stacktrace)
 
     def _emit_exception(
         self, exc: BaseException, meta: Dict[str, Any], prefix: str = ""
@@ -501,21 +443,6 @@ class GratheonLogger:
             meta_text = f" {PURPLE}{_safe_json_dumps(meta)}{RESET}"
         location_text = f" {GREY}{file_location}{RESET}" if file_location else ""
         print(f"{timestamp} [{level_colored}]: {message_colored}{meta_text}{location_text}")
-
-    def _store_in_loki(
-        self, level: str, message: str, meta: Dict[str, Any], stacktrace: str = ""
-    ) -> None:
-        if self._loki is None or not self._loki.enabled:
-            return
-
-        payload = self._safe_payload_for_test(level, message, meta, stacktrace)
-        thread = threading.Thread(
-            target=self._push_loki,
-            args=(payload,),
-            name="gratheon-log-lib-loki",
-            daemon=True,
-        )
-        thread.start()
 
     def _store_in_otlp(
         self, level: str, message: str, meta: Dict[str, Any], stacktrace: str = ""
@@ -571,54 +498,6 @@ class GratheonLogger:
         except Exception:
             if os.getenv("ENV_ID", "").lower() == "dev":
                 print("[log-lib-py] Failed to export log to OTLP", file=sys.stderr)
-
-    def _safe_payload_for_test(
-        self, level: str, message: str, meta: Dict[str, Any], stacktrace: str = ""
-    ) -> bytes:
-        if self._loki is None:
-            raise RuntimeError("Loki is not configured")
-
-        line = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-            "level": level,
-            "service": self._loki.service,
-            "message": message,
-            "meta": _safe_jsonable(meta),
-            "stacktrace": stacktrace or "",
-        }
-        body = {
-            "streams": [
-                {
-                    "stream": self._loki.labels,
-                    "values": [[str(time.time_ns()), _safe_json_dumps(line)[:120000]]],
-                }
-            ]
-        }
-        return json.dumps(body, ensure_ascii=True).encode("utf-8")
-
-    def _push_loki(self, payload: bytes) -> None:
-        assert self._loki is not None
-        request = urllib.request.Request(
-            self._loki.url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        if self._loki.tenant_id:
-            request.add_header("X-Scope-OrgID", self._loki.tenant_id)
-        if self._loki.username or self._loki.password:
-            import base64
-
-            token = f"{self._loki.username or ''}:{self._loki.password or ''}".encode("utf-8")
-            request.add_header("Authorization", f"Basic {base64.b64encode(token).decode('ascii')}")
-
-        try:
-            with urllib.request.urlopen(request, timeout=2):
-                pass
-        except (urllib.error.URLError, TimeoutError, OSError):
-            if os.getenv("ENV_ID", "").lower() == "dev":
-                print("[log-lib-py] Failed to persist log to Loki", file=sys.stderr)
-
 
 def create_logger(config: Optional[LoggerConfig] = None) -> GratheonLogger:
     return GratheonLogger(config)

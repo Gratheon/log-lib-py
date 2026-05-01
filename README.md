@@ -6,13 +6,12 @@ Python logging library for Gratheon services with colored console output and opt
 
 `1.0.0` is the ClickStack/OTLP major release.
 
-Breaking behavior change: Loki is no longer enabled implicitly. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` for ClickStack logs, or set `LOKI_URL`/`LokiConfig` if a service still needs Loki during migration.
+Breaking behavior change: Loki support has been removed. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` for ClickStack logs.
 
 ## Features
 
 - Colored console logger for `info`, `warn`, `error`, and `debug`
 - Optional OTLP HTTP JSON log export
-- Optional Loki compatibility transport
 - Automatic `file:line` capture
 - Enriched exception logging with stack traces, cause chains, and dev-mode code frames
 - Context binding helpers for request correlation

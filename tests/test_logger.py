@@ -10,7 +10,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from gratheon_log_lib import (
     LoggerConfig,
-    LokiConfig,
     OtlpConfig,
     bind_context,
     clear_context,
@@ -25,7 +24,7 @@ class LoggerTests(unittest.TestCase):
         clear_context()
 
     def test_info_includes_context(self) -> None:
-        logger = create_logger(LoggerConfig(loki=LokiConfig(enabled=False)))
+        logger = create_logger(LoggerConfig())
         bind_context(req_id="abc")
         stream = io.StringIO()
         with redirect_stdout(stream):
@@ -36,14 +35,14 @@ class LoggerTests(unittest.TestCase):
         self.assertIn('"req_id": "abc"', output)
         self.assertIn('"user_id": "42"', output)
 
-    def test_debug_is_not_sent_to_loki(self) -> None:
-        logger = create_logger(LoggerConfig(loki=LokiConfig(enabled=True, url="http://example.com")))
-        with patch.object(logger, "_push_loki") as push_loki:
+    def test_debug_is_not_exported_to_otlp(self) -> None:
+        logger = create_logger(LoggerConfig(otlp=OtlpConfig(enabled=True, endpoint="http://example.com")))
+        with patch.object(logger, "_push_otlp") as push_otlp:
             logger.debug("debugging")
-        push_loki.assert_not_called()
+        push_otlp.assert_not_called()
 
     def test_error_enriched_prints_prefix(self) -> None:
-        logger = create_logger(LoggerConfig(loki=LokiConfig(enabled=False)))
+        logger = create_logger(LoggerConfig())
         stream = io.StringIO()
         with redirect_stdout(stream):
             try:
@@ -61,25 +60,6 @@ class LoggerTests(unittest.TestCase):
             self.assertEqual("42", request_context_value("user_id"))
         self.assertEqual("outer", request_context_value("req_id"))
         self.assertIsNone(request_context_value("user_id"))
-
-    def test_loki_payload_uses_service_label(self) -> None:
-        logger = create_logger(
-            LoggerConfig(
-                loki=LokiConfig(
-                    enabled=True,
-                    url="http://example.com",
-                    service="svc",
-                    labels={"team": "platform"},
-                )
-            )
-        )
-        with patch("threading.Thread.start") as start_mock:
-            logger.info("hello")
-        start_mock.assert_called_once()
-        payload = logger._safe_payload_for_test("info", "hello", {}, "")
-        body = json.loads(payload.decode("utf-8"))
-        self.assertEqual("svc", body["streams"][0]["stream"]["service"])
-        self.assertEqual("platform", body["streams"][0]["stream"]["team"])
 
     def test_otlp_payload_uses_resource_attributes(self) -> None:
         logger = create_logger(

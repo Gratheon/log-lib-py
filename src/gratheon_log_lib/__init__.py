@@ -1,7 +1,6 @@
 from .logger import (
     GratheonLogger,
     LoggerConfig,
-    LokiConfig,
     OtlpConfig,
     bind_context,
     clear_context,
@@ -21,7 +20,6 @@ from .logger import (
 __all__ = [
     "GratheonLogger",
     "LoggerConfig",
-    "LokiConfig",
     "OtlpConfig",
     "bind_context",
     "clear_context",
