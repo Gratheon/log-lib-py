@@ -11,7 +11,7 @@ import threading
 import time
 import traceback
 import types
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, Generator, List, Optional, Tuple, Type
 
 
 RESET = "\033[0m"
@@ -31,7 +31,7 @@ LOG_LEVELS = {
 }
 
 _context_fields: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
-    "gratheon_log_lib_context", default={}
+    "gratheon_log_lib_context", default={}  # noqa: B039  readers always copy it via dict()
 )
 _logger_lock = threading.RLock()
 _global_logger = None  # type: Optional["GratheonLogger"]
@@ -79,7 +79,7 @@ def get_context() -> Dict[str, Any]:
 
 
 @contextlib.contextmanager
-def request_context(**fields: Any) -> Iterator[None]:
+def request_context(**fields: Any) -> Generator[None, None, None]:
     current = dict(_context_fields.get())
     updated = dict(current)
     updated.update(fields)
@@ -325,11 +325,15 @@ def _build_code_frame(exc: BaseException, context_lines: int = 2) -> str:
     except OSError:
         return ""
 
-    start = max(1, culprit.lineno - context_lines)
-    end = min(len(lines), culprit.lineno + context_lines)
+    lineno = culprit.lineno
+    if lineno is None:
+        return ""
+
+    start = max(1, lineno - context_lines)
+    end = min(len(lines), lineno + context_lines)
     output = []  # type: List[str]
     for line_no in range(start, end + 1):
-        prefix = f"{RED}>{RESET}" if line_no == culprit.lineno else " "
+        prefix = f"{RED}>{RESET}" if line_no == lineno else " "
         output.append(f"{prefix} {line_no:4d} | {lines[line_no - 1]}")
     return "\n".join(output)
 
