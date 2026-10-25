@@ -1,0 +1,25 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.16.9"
+
+  deptry-ty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv venv --python 3.12 && uv pip install -e . deptry==0.25.1
+      - run: .venv/bin/deptry .
+      # ty is beta (0.0.x): keep the version pinned, new releases can add new errors
+      - run: uvx ty@0.0.91 check --python .venv
